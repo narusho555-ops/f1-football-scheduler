@@ -12,79 +12,80 @@ now_jst = datetime.now(JST)
 start_window = now_jst - timedelta(hours=12)
 end_window = now_jst + timedelta(days=30)
 
-st.set_page_config(page_title="Paddock & Pitch", page_icon="🏎️", layout="centered")
+st.set_page_config(page_title="Debug Mode: Paddock & Pitch", page_icon="🔧")
 
-# デザイン設定
-st.markdown("""
-    <style>
-    .session-card { padding: 12px; margin-bottom: 8px; border-radius: 4px; background-color: #1E1E1E; border-left: 5px solid #FFFFFF; }
-    .f1-card { border-left-color: #FF1801; }
-    .f2-card { border-left-color: #0090D0; }
-    .session-name { font-size: 15px; font-weight: bold; color: #FAFAFA; }
-    .time-jst { color: #FF4B4B; font-weight: bold; font-size: 16px; }
-    .event-title { background: #262730; padding: 8px 12px; border-radius: 5px; margin-top: 15px; font-weight: bold; color: #EEE; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- 2. ロジック：サッカー日程（Webスクレイピング） ---
-@st.cache_data(ttl=3600)
-def get_web_soccer_schedule():
+# --- 2. 【デバッグ版】サッカー日程取得ロジック ---
+@st.cache_data(ttl=600)
+def get_web_soccer_schedule_debug():
+    debug_info = []
     all_matches = []
-    # ユーザーエージェントを設定してアクセス拒否を回避
     url = "https://soccer.yahoo.co.jp/jleague/teams/schedule/95"
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     
     try:
+        debug_info.append(f"🔍 Accessing URL: {url}")
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        
         with urllib.request.urlopen(req) as response:
             html = response.read()
-        tables = pd.read_html(html)
-        df = tables[0]
+            debug_info.append("✅ HTML source retrieved successfully.")
         
-        for _, row in df.iterrows():
-            try:
-                date_part = str(row[0]) # "5/3（日）"
-                time_part = str(row[1]) # "17:00"
-                opp = str(row[3])       # "長崎"
-                
-                m = int(date_part.split('/')[0])
-                d = int(date_part.split('/')[1].split('（')[0])
-                h = int(time_part.split(':')[0])
-                mn = int(time_part.split(':')[1])
-                
-                match_time = JST.localize(datetime(2026, m, d, h, mn))
-                all_matches.append({"team": "名古屋", "opp": opp, "time": match_time})
-            except: continue
-    except: pass
-    return all_matches
+        # HTML内に 'table' という文字列があるかチェック
+        if b'<table' in html:
+            debug_info.append("✅ Table tag found in HTML.")
+        else:
+            debug_info.append("❌ No table tag found in HTML source.")
 
-# --- 3. ロジック：F1/F2 (FastF1) ---
-@st.cache_data(ttl=3600)
-def get_racing_events(year):
-    try:
-        return fastf1.get_event_schedule(year)
-    except:
-        return pd.DataFrame()
+        tables = pd.read_html(html)
+        debug_info.append(f"✅ Found {len(tables)} tables on the page.")
+        
+        if len(tables) > 0:
+            df = tables[0]
+            debug_info.append(f"📊 Columns in Table 0: {list(df.columns)}")
+            # 最初の1行をサンプル表示用に保持
+            debug_info.append(f"📝 Sample Data (Row 0): {df.iloc[0].values.tolist()}")
+            
+            for _, row in df.iterrows():
+                try:
+                    # ここの列インデックスがサイト改修でズレている可能性アリ
+                    date_part = str(row[0]) 
+                    time_part = str(row[1]) 
+                    opp = str(row[3])       
+                    
+                    m = int(date_part.split('/')[0])
+                    d = int(date_part.split('/')[1].split('（')[0])
+                    h = int(time_part.split(':')[0])
+                    mn = int(time_part.split(':')[1])
+                    
+                    match_time = JST.localize(datetime(2026, m, d, h, mn))
+                    all_matches.append({"team": "名古屋", "opp": opp, "time": match_time})
+                except Exception as row_e:
+                    continue
+        else:
+            debug_info.append("❌ Tables list is empty.")
 
-# --- 4. メイン表示エリア ---
-st.title("🏎️⚽ Paddock & Pitch")
-st.write(f"Standard: **{now_jst.strftime('%m/%d %H:%M')}** JST")
+    except Exception as e:
+        debug_info.append(f"🔥 CRITICAL ERROR: {str(e)}")
+    
+    return all_matches, debug_info
+
+# --- 3. メイン表示 ---
+st.title("🔧 Paddock & Pitch (Debug Mode)")
+
+# デバッグ情報の表示用エキスパンダー
+with st.expander("🛠️ Debug Logs (エンジニア用ログ)"):
+    matches, logs = get_web_soccer_schedule_debug()
+    for log in logs:
+        st.code(log)
 
 tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football", "🏎️ F1", "🏁 F2"])
 
-# Soccer Tab
 with tab_fb:
-    st.subheader("Web Sync: Nagoya Grampus")
-    matches = get_web_soccer_schedule()
     if matches:
-        found = False
         for m in matches:
             if start_window <= m['time'] <= end_window:
-                found = True
-                st.markdown(f"""<div class="session-card"><div class="session-name">【{m['team']}】 vs {m['opp']}</div>
-                    <span class="time-jst">🇯🇵 {m['time'].strftime('%m/%d %H:%M')} JST</span></div>""", unsafe_allow_html=True)
-        if not found: st.info("表示期間内の試合はありません。")
+                st.success(f"【{m['team']}】 vs {m['opp']} | 🕒 {m['time'].strftime('%m/%d %H:%M')}")
     else:
-        st.error("Webデータの取得に失敗しました。")
+        st.error("試合日程を表示できません。上のDebug Logsを確認してください。")
 
 # F1 Tab
 events = get_racing_events(now_jst.year)
