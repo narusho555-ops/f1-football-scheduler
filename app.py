@@ -92,7 +92,7 @@ def load_fallback():
 def get_soccer_events():
     ICS_SOURCES = [
         {"team": "名古屋グランパス", "url": "https://example.com/nagoya.ics"},
-        {"team": "レアル・ソシエダ", "url": "https://example.com/sociedad.ics"},
+        {"team": "レアル・ソシエダ", "url": "https://www.stanza.co/api/schedules/soccer/la-liga/real-sociedad.ics"},
         {"team": "日本代表", "url": "https://example.com/japan.ics"},
         {"team": "U23日本代表", "url": "https://example.com/u23.ics"},
     ]
