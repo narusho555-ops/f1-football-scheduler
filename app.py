@@ -3,60 +3,90 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import fastf1
-import requests
-from ics import Calendar # pip install ics が必要です
+import os
 
 # --- 1. 設定 ---
 JST = pytz.timezone('Asia/Tokyo')
-now = datetime.now(JST)
+now_jst = datetime.now(JST)
+start_window = now_jst - timedelta(hours=12)
+end_window = now_jst + timedelta(days=30)
 
-# --- 2. Webからカレンダー情報を自動取得する関数 ---
+st.set_page_config(page_title="Paddock & Pitch", page_icon="🏎️", layout="centered")
+
+# CSSスタイル（成瀬さんの好みのデザインを維持）
+st.markdown("""
+    <style>
+    .session-card { padding: 12px; margin-bottom: 8px; border-radius: 4px; background-color: #1E1E1E; border-left: 5px solid #FFFFFF; }
+    .f1-card { border-left-color: #FF1801; }
+    .f2-card { border-left-color: #0090D0; }
+    .session-name { font-size: 15px; font-weight: bold; color: #FAFAFA; }
+    .time-jst { color: #FF4B4B; font-weight: bold; font-size: 16px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. Webから直接データを「抜く」関数 ---
 @st.cache_data(ttl=3600)
-def get_soccer_schedule_from_web():
-    # 各チームの公開カレンダーURL（例として、信頼性の高いデータソースのURLを指定）
-    # ※本来は各チーム公式やJリーグ公式のICSを指定します
-    urls = {
-        "名古屋グランパス": "https://calendar.google.com/calendar/ical/...", # 実際のURLに置き換え可能
-        "レアル・ソシエダ": "https://calendar.google.com/calendar/ical/..."
-    }
+def get_web_soccer_schedule():
+    """
+    特定のスポーツサイトの日程表ページ（HTMLのtableタグ）を
+    Pandasで直接読み込んで解析します。
+    """
+    all_matches = []
     
-    matches = []
-    # 今回は「Webから自動で表を読み取る」最も強力な Pandas.read_html を活用します
-    # スクレイピングの一種ですが、非常に安定した大手スポーツサイトを対象にします
+    # 名古屋グランパスの日程ページ（一例としてYahoo!スポーツのチームID: 95）
     try:
-        # スポーツナビなどの試合日程ページから直接テーブルを読み込む（例）
-        # ※URLは動的に解析可能です
-        df_list = pd.read_html("https://soccer.yahoo.co.jp/jleague/teams/schedule/95") # 名古屋
-        df = df_list[0]
-        # ここでWeb上の表を自動解析してリスト化
-        # (デモ用に解析結果の構造を反映)
-        matches.append({"team": "名古屋グランパス", "opp": "V・ファーレン長崎", "time": JST.localize(datetime(2026, 5, 3, 17, 0))})
-        matches.append({"team": "名古屋グランパス", "opp": "ガンバ大阪", "time": JST.localize(datetime(2026, 5, 6, 14, 0))})
-    except:
+        # read_htmlはページ内のテーブルをすべてリストとして取得します
+        url = "https://soccer.yahoo.co.jp/jleague/teams/schedule/95"
+        tables = pd.read_html(url)
+        df = tables[0] # 通常、最初の日程テーブルを取得
+        
+        # テーブルの各行をループして試合情報を抽出
+        for _, row in df.iterrows():
+            try:
+                # サイトの構造に合わせて列（日時、対戦相手）を抽出
+                # ※ここは実際のサイトの列名に合わせて調整されます
+                date_str = str(row[0]) # 例: "5/3（日）"
+                time_str = str(row[1]) # 例: "17:00"
+                opponent = str(row[3]) # 対戦相手
+                
+                # 日時文字列をdatetimeに変換するロジック（簡易版）
+                month = int(date_str.split('/')[0])
+                day = int(date_str.split('/')[1].split('（')[0])
+                hour = int(time_str.split(':')[0])
+                minute = int(time_str.split(':')[1])
+                
+                match_time = JST.localize(datetime(2026, month, day, hour, minute))
+                all_matches.append({"team": "名古屋", "opp": opponent, "time": match_time})
+            except:
+                continue
+    except Exception as e:
+        # Web取得に失敗した際の最低限の表示（またはエラーログ）
         pass
-    
-    return matches
 
-# --- 3. UI表示 ---
-st.title("🏎️⚽ Paddock & Pitch (Web Sync)")
+    return all_matches
 
-tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football", "🏎️ F1", "🏁 F2"])
+# --- 3. メイン表示 ---
+st.title("🏎️⚽ Paddock & Pitch")
+
+tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football (Web Auto)", "🏎️ F1", "🏁 F2"])
 
 with tab_fb:
-    st.subheader("Web Sync Schedule")
-    # ここでWebから最新情報を自動取得
-    matches = get_soccer_schedule_from_web()
+    st.subheader("Detected Web Schedule")
+    # ここで実際にWebサイトの表を読みに行きます
+    with st.spinner('Fetching latest match data...'):
+        matches = get_web_soccer_schedule()
     
     if matches:
         for m in matches:
-            st.markdown(f"""
-            <div style="padding:10px; border-left:5px solid #FFF; background:#1E1E1E; margin-bottom:10px;">
-                <div style="font-size:15px; font-weight:bold;">{m['team']} vs {m['opp']}</div>
-                <div style="color:#FF4B4B; font-weight:bold;">🕒 {m['time'].strftime('%m/%d %H:%M')} JST</div>
-            </div>
-            """, unsafe_allow_html=True)
+            if start_window <= m['time'] <= end_window:
+                st.markdown(f"""
+                    <div class="session-card">
+                        <div class="session-name">【{m['team']}】 vs {m['opp']}</div>
+                        <span class="time-jst">🇯🇵 {m['time'].strftime('%m/%d %H:%M')} JST</span>
+                    </div>
+                    """, unsafe_allow_html=True)
     else:
-        st.error("Webからの情報取得に失敗しました。サイトの構造が変わった可能性があります。")
+        st.warning("Webから試合日程を取得できませんでした。サイト構成を確認してください。")
 
 # --- F1/F2 Tab ---
 # (F1/F2のロジックは正常に動いているため維持)
