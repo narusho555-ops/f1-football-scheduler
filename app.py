@@ -4,6 +4,7 @@ import pytz
 import fastf1
 import os
 import pandas as pd
+import feedparser
 
 # --- 1. キャッシュ・環境設定 ---
 CACHE_DIR = 'f1_cache'
@@ -22,14 +23,12 @@ st.set_page_config(page_title="Paddock & Pitch", page_icon="🏎️", layout="ce
 
 st.markdown("""
     <style>
-    /* 共通カードデザイン */
     .session-card {
         padding: 12px;
         margin-bottom: 8px;
         border-radius: 4px;
         background-color: #1E1E1E;
     }
-    /* カテゴリー別カラー */
     .fb-card { border-left: 5px solid #FFFFFF; } /* サッカー：白 */
     .f1-card { border-left: 5px solid #FF1801; } /* F1：赤 */
     .f2-card { border-left: 5px solid #0090D0; } /* F2：青 */
@@ -37,6 +36,7 @@ st.markdown("""
     .session-name { font-size: 14px; font-weight: bold; color: #FAFAFA; }
     .time-jst { color: #FF4B4B; font-weight: bold; font-size: 15px; }
     .time-local { color: #888; font-size: 12px; }
+    .rss-info { font-size: 11px; color: #aaa; margin-top: 4px; }
     .event-title { 
         background: #262730; padding: 8px 12px; border-radius: 5px; 
         margin-top: 15px; font-weight: bold; color: #EEE;
@@ -45,9 +45,10 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("🏎️⚽ Paddock & Pitch")
-st.write(f"Standard: **{now_jst.strftime('%m/%d %H:%M')}** JST")
+st.write(f"Last Update: **{now_jst.strftime('%m/%d %H:%M')}** JST")
 
 # --- 4. ロジック：データ取得 ---
+
 @st.cache_data(ttl=3600)
 def get_racing_events(year):
     try:
@@ -55,13 +56,34 @@ def get_racing_events(year):
     except:
         return pd.DataFrame()
 
-# --- 5. メイン表示エリア（タブ設定） ---
+@st.cache_data(ttl=1800)
+def get_soccer_updates():
+    """RSSから最新ニュースと試合情報を抽出"""
+    feeds = [
+        "https://news.yahoo.co.jp/rss/topics/soccer.xml",
+        "https://news.yahoo.co.jp/rss/categories/sports.xml"
+    ]
+    targets = ["名古屋", "グランパス", "ソシエダ", "日本代表"]
+    updates = []
+    
+    for url in feeds:
+        try:
+            f = feedparser.parse(url)
+            for entry in f.entries:
+                if any(t in entry.title for t in targets):
+                    updates.append({"title": entry.title, "link": entry.link})
+        except:
+            continue
+    return updates
+
+# --- 5. メイン表示エリア ---
 tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football", "🏎️ F1", "🏁 F2"])
 
 # --- Soccer Tab ---
 with tab_fb:
-    st.subheader("Target Teams Schedule")
-    # 名古屋グランパス、レアルソシエダ、日本代表等のリアルな直近日程
+    st.subheader("Target Teams Schedule & News")
+    
+    # A. 確定スケジュール（バックアップ用：RSS解析が完璧でない場合に備える）
     real_matches = [
         {"team": "名古屋グランパス", "opp": "ヴィッセル神戸", "time": JST.localize(datetime(2026, 5, 3, 19, 0)), "tz": "Asia/Tokyo"},
         {"team": "名古屋グランパス", "opp": "サンフレッチェ広島", "time": JST.localize(datetime(2026, 5, 6, 15, 0)), "tz": "Asia/Tokyo"},
@@ -81,19 +103,24 @@ with tab_fb:
                 </div>
                 """, unsafe_allow_html=True)
 
+    # B. RSSからの最新トピック表示
+    rss_news = get_soccer_updates()
+    if rss_news:
+        st.write("---")
+        st.caption("Latest Topics from RSS")
+        for news in rss_news[:5]: # 最新5件を表示
+            st.markdown(f"🔹 [{news['title']}]({news['link']})")
+
 # --- F1 Tab ---
 with tab_f1:
     events = get_racing_events(now_jst.year)
     if not events.empty:
-        upcoming_f1 = events[events['EventDate'] >= (start_window.replace(tzinfo=None) - timedelta(days=5))]
+        upcoming_f1 = events[events['EventDate'] >= (now_jst.replace(tzinfo=None) - timedelta(days=3))]
         for _, event in upcoming_f1.iterrows():
             sessions = [
-                ('FP1', 'Session1DateUtc'),
-                ('Qualifying', 'Session4DateUtc'),
-                ('Sprint', 'Session3DateUtc'),
-                ('Race', 'Session5DateUtc'),
+                ('FP1', 'Session1DateUtc'), ('Qualifying', 'Session4DateUtc'),
+                ('Sprint', 'Session3DateUtc'), ('Race', 'Session5DateUtc'),
             ]
-            
             display_sessions = []
             for s_name, s_key in sessions:
                 if s_key in event and pd.notna(event[s_key]):
@@ -116,20 +143,14 @@ with tab_f1:
 # --- F2 Tab ---
 with tab_f2:
     if not events.empty:
-        upcoming_f2 = events[events['EventDate'] >= (start_window.replace(tzinfo=None) - timedelta(days=5))]
         found_f2 = False
-        for _, event in upcoming_f2.iterrows():
-            # F2用のセッションキー（FastF1の仕様に準拠）
+        for _, event in events.iterrows():
             f2_sessions = [
-                ('F2 Practice', 'Session1DateUtc'),
-                ('F2 Qualifying', 'Session2DateUtc'),
-                ('F2 Sprint Race', 'Session3DateUtc'),
-                ('F2 Feature Race', 'Session5DateUtc')
+                ('F2 Practice', 'Session1DateUtc'), ('F2 Qualifying', 'Session2DateUtc'),
+                ('F2 Sprint', 'Session3DateUtc'), ('F2 Feature', 'Session5DateUtc')
             ]
-            
             display_f2 = []
             for s_name, s_key in f2_sessions:
-                # F2開催イベントかどうかの簡易判定（EventFormat等で判定可能だがここでは実用性を優先）
                 if s_key in event and pd.notna(event[s_key]):
                     jst_time = event[s_key].replace(tzinfo=pytz.UTC).astimezone(JST)
                     if start_window <= jst_time <= end_window:
@@ -148,4 +169,4 @@ with tab_f2:
                             </div>
                             """, unsafe_allow_html=True)
         if not found_f2:
-            st.write("対象期間内にF2のセッション予定はありません。")
+            st.write("直近のF2セッションはありません。")
