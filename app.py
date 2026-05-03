@@ -19,7 +19,10 @@ st.set_page_config(page_title="Debug Mode: Paddock & Pitch", page_icon="🔧")
 def get_web_soccer_schedule_debug():
     debug_info = []
     all_matches = []
-    url = "https://soccer.yahoo.co.jp/jleague/teams/schedule/95"
+    #######################################
+    # ここにグランパスのアドレスを明確に打ち込む！
+    #######################################
+    url = "https://soccer.yahoo.co.jp/jleague/category/j1/teams/127/info?gk=2"
     
     try:
         debug_info.append(f"🔍 Accessing URL: {url}")
