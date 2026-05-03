@@ -23,7 +23,7 @@ st.markdown("""
     .big-font { font-size:20px !important; font-weight: bold; }
     .local-time { color: #888; font-size: 14px; }
     </style>
-    """, unsafe_allow_stdio=True)
+    """, unsafe_allow_html=True)
 
 st.title("🏎️⚽ Paddock & Pitch")
 st.caption("F1/F2/Football 直近スケジュール（日本時間・現地時間）")
@@ -63,6 +63,6 @@ with tab3:
     for team, category in teams.items():
         with st.expander(f"{team} ({category})", expanded=True):
             # サンプルの表示形式
-            st.markdown(f'<p class="big-font">vs 対戦相手チーム名</p>', unsafe_allow_stdio=True)
+            st.markdown(f'<p class="big-font">vs 対戦相手チーム名</p>', unsafe_allow_html=True)
             st.write(f"📅 **{(now + timedelta(days=2)).strftime('%m/%d %H:%M')} JST**")
-            st.markdown(f'<p class="local-time">📍 現地時間: 03/24 21:00</p>', unsafe_allow_stdio=True)
+            st.markdown(f'<p class="local-time">📍 現地時間: 03/24 21:00</p>', unsafe_allow_html=True)
