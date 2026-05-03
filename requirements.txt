@@ -3,3 +3,4 @@ pandas
 pytz
 fastf1
 requests
+numpy<2.0.0
