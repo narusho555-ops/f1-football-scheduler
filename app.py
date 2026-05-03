@@ -1,47 +1,56 @@
 import streamlit as st
-import feedparser
-import requests
-import json
+from datetime import datetime, timedelta
+import pytz
 
-# --- 1. アプリの設定（スマホで見やすい構成） ---
-st.set_page_config(page_title="F1 Peak Insight", page_icon="🏎️")
+# --- 設定 ---
+st.set_page_config(page_title="Paddock & Pitch Schedule", page_icon="🏎️", layout="centered")
 
-st.title("🏎️ F1 Peak Insight")
-st.caption("1次ソースから真実を抽出するインテリジェンス・ツール")
+# カスタムCSSでデザインを調整（文字サイズなど）
+st.markdown("""
+    <style>
+    .big-font { font-size:20px !important; font-weight: bold; }
+    .local-time { color: #888; font-size: 14px; }
+    </style>
+    """, unsafe_allow_stdio=True)
 
-# --- 2. API設定（先ほどの成功キーを使用） ---
-API_KEY = "AIzaSyBUme94LBfSsWgcCTD8dZOWwWwWHDw4Sdw"
-MODEL_NAME = "models/gemini-3-flash-preview"
-URL = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={API_KEY}"
+st.title("🏎️⚽ Paddock & Pitch")
+st.caption("F1/F2/Football 直近スケジュール（日本時間・現地時間）")
 
-# --- 3. ニュース取得ロジック ---
-def analyze_news(title):
-    prompt = f"F1専門家として、このニュースを日本語で鋭く分析して。タイトル: {title}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    try:
-        res = requests.post(URL, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
-        return res.json()['candidates'][0]['content']['parts'][0]['text']
-    except:
-        return "解析エラーが発生しました。時間を置いて試してください。"
+# 時間軸の設定（現在からマイナス6時間〜1ヶ月）
+JST = pytz.timezone('Asia/Tokyo')
+now = datetime.now(JST)
+start_window = now - timedelta(hours=6)
+end_window = now + timedelta(days=30)
 
-# --- 4. UI（サイドバーとメイン画面） ---
-with st.sidebar:
-    st.header("設定")
-    sources = {
-        "F1 Official": "https://www.formula1.com/content/fom-website/en/latest/all.xml",
-        "Autosport": "https://www.autosport.com/rss/f1/news/"
+# --- タブ分けでスッキリ見せる ---
+tab1, tab2, tab3 = st.tabs(["🏎️ F1", "🏁 F2", "⚽ Football"])
+
+with tab1:
+    st.subheader("F1 Session Schedule")
+    # ここにFastF1等の取得ロジックを入れる
+    # デザイン例:
+    st.info("🇦🇺 オーストラリアGP (Melbourne)")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("🏁 **Race (JST)**")
+        st.write("03/22 13:00")
+    with col2:
+        st.write("📍 **Local**")
+        st.write("03/22 15:00")
+
+with tab3:
+    st.subheader("Target Teams Matches")
+    # 名古屋グランパス、ソシエダ、日本代表の表示
+    teams = {
+        "名古屋グランパス": "🇯🇵 J1 League",
+        "レアル・ソシエダ": "🇪🇸 La Liga",
+        "男子日本代表": "🌏 International",
+        "U23日本代表": "🌏 U23"
     }
-    selected_source = st.selectbox("ニュースソースを選択", list(sources.keys()))
-
-if st.button("🏁 最新ニュースを解析"):
-    with st.spinner("パドックの情報を収集中..."):
-        feed = feedparser.parse(sources[selected_source])
-        if feed.entries:
-            for entry in feed.entries[:3]: # 最新3件
-                with st.expander(f"📌 {entry.title}", expanded=True):
-                    analysis = analyze_news(entry.title)
-                    st.write(analysis)
-                    st.divider()
-                    st.link_button("原文（1次ソース）へ", entry.link)
-        else:
-            st.error("記事が取得できませんでした。")
+    
+    for team, category in teams.items():
+        with st.expander(f"{team} ({category})", expanded=True):
+            # サンプルの表示形式
+            st.markdown(f'<p class="big-font">vs 対戦相手チーム名</p>', unsafe_allow_stdio=True)
+            st.write(f"📅 **{(now + timedelta(days=2)).strftime('%m/%d %H:%M')} JST**")
+            st.markdown(f'<p class="local-time">📍 現地時間: 03/24 21:00</p>', unsafe_allow_stdio=True)
