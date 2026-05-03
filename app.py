@@ -54,7 +54,7 @@ with tab_fb:
     st.markdown('<a href="https://nagoya-grampus.jp/game/schedule/" target="_blank" class="link-button">🔥 名古屋グランパス 公式日程</a>', unsafe_allow_html=True)
     
     # レアル・ソシエダ（日本語版または公式）
-    st.markdown('<a href="https://www.realsociedad.eus/ja/calendar" target="_blank" class="link-button">🇪🇸 レアル・ソシエダ 公式日程</a>', unsafe_allow_html=True)
+    st.markdown('<a href="https://www.realsociedad.eus/es/equipo/partidos/real-sociedad" target="_blank" class="link-button">🇪🇸 レアル・ソシエダ 公式日程</a>', unsafe_allow_html=True)
     
     # 日本代表（JFA公式）
     st.markdown('<a href="https://www.jfa.jp/samuraiblue/schedule_result/" target="_blank" class="link-button">🇯🇵 日本代表 (SAMURAI BLUE)</a>', unsafe_allow_html=True)
