@@ -1,6 +1,18 @@
 import streamlit as st
 from datetime import datetime, timedelta
 import pytz
+import fastf1
+import os
+
+# キャッシュディレクトリの名前を定義
+CACHE_DIR = 'f1_cache'
+
+# フォルダが存在しない場合は作成する
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
+
+# FastF1にキャッシュの使用を許可する
+fastf1.Cache.enable_cache(CACHE_DIR)
 
 # --- 設定 ---
 st.set_page_config(page_title="Paddock & Pitch Schedule", page_icon="🏎️", layout="centered")
