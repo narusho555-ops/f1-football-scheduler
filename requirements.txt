@@ -1,6 +1,7 @@
 streamlit
 pandas
 pytz
+numpy==1.26.4
 fastf1
 icalendar
 requests
