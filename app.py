@@ -5,7 +5,15 @@ import pytz
 import requests
 from icalendar import Calendar
 import fastf1
+import os
+import fastf1
 
+CACHE_DIR = "cache"
+
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
+
+fastf1.Cache.enable_cache(CACHE_DIR)
 # -----------------------------
 # 基本設定
 # -----------------------------
