@@ -3,122 +3,154 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import fastf1
-import urllib.request
-import re
+import requests
+from icalendar import Calendar
+import json
 
-# --- 1. 設定 ---
+# --- 設定 ---
 JST = pytz.timezone('Asia/Tokyo')
 now_jst = datetime.now(JST)
-start_window = now_jst - timedelta(hours=12)
+start_window = now_jst - timedelta(hours=6)
 end_window = now_jst + timedelta(days=30)
 
 st.set_page_config(page_title="Paddock & Pitch", page_icon="🏎️", layout="centered")
 
-# デザイン設定
+# --- スタイル ---
 st.markdown("""
-    <style>
-    .session-card { padding: 12px; margin-bottom: 8px; border-radius: 4px; background-color: #1E1E1E; border-left: 5px solid #FFFFFF; }
-    .f1-card { border-left-color: #FF1801; }
-    .f2-card { border-left-color: #0090D0; }
-    .session-name { font-size: 15px; font-weight: bold; color: #FAFAFA; }
-    .time-jst { color: #FF4B4B; font-weight: bold; font-size: 16px; }
-    .event-title { background: #262730; padding: 8px 12px; border-radius: 5px; margin-top: 15px; font-weight: bold; color: #EEE; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+.session-card {
+    padding: 12px; margin-bottom: 8px; border-radius: 6px;
+    background-color: #1E1E1E; border-left: 5px solid #FFFFFF;
+}
+.f1-card { border-left-color: #FF1801; }
+.f2-card { border-left-color: #0090D0; }
+.fb-card { border-left-color: #00C853; }
 
-# --- 2. ロジック：サッカー日程（正規表現でHTML解析 - lxml不要） ---
-@st.cache_data(ttl=3600)
-def get_soccer_schedule_regex():
-    all_matches = []
-    #######################################
-    # ここにグランパスのアドレスを明確に打ち込む！
-    #######################################
-    url = "https://soccer.yahoo.co.jp/jleague/category/j1/teams/127/info?gk=2"
-    
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response:
-            html = response.read().decode('utf-8')
-        
-        # HTMLのテーブル行を強引に抽出
-        rows = re.findall(r'<tr>(.*?)</tr>', html, re.DOTALL)
-        for row in rows:
-            try:
-                cells = re.findall(r'<td.*?>(.*?)</td>', row, re.DOTALL)
-                if len(cells) >= 4:
-                    date_text = re.sub(r'<.*?>', '', cells[0]).strip() # 5/3(日)
-                    time_text = re.sub(r'<.*?>', '', cells[1]).strip() # 17:00
-                    opp_text = re.sub(r'<.*?>', '', cells[3]).strip()  # 相手チーム名
-                    
-                    if '/' in date_text and ':' in time_text:
-                        m = int(date_text.split('/')[0])
-                        d = int(date_text.split('/')[1].split('(')[0])
-                        h = int(time_text.split(':')[0])
-                        mn = int(time_text.split(':')[1])
-                        
-                        match_time = JST.localize(datetime(2026, m, d, h, mn))
-                        all_matches.append({"team": "名古屋", "opp": opp_text, "time": match_time})
-            except: continue
-    except: pass
-    return all_matches
+.session-name { font-size: 15px; font-weight: bold; color: #FAFAFA; }
+.time-jst { color: #FF4B4B; font-weight: bold; font-size: 15px; }
+.time-local { color: #BBBBBB; font-size: 13px; }
+.event-title {
+    background: #262730; padding: 8px 12px;
+    border-radius: 5px; margin-top: 15px; font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# --- 3. ロジック：F1/F2日程 ---
+# --- ICS取得 ---
 @st.cache_data(ttl=3600)
-def get_racing_events(year):
+def load_ics_events(url, team):
+    events = []
     try:
-        return fastf1.get_event_schedule(year)
+        r = requests.get(url, timeout=10)
+        cal = Calendar.from_ical(r.text)
+
+        for comp in cal.walk():
+            if comp.name == "VEVENT":
+                dt = comp.get("dtstart").dt
+
+                # タイムゾーン処理
+                if dt.tzinfo:
+                    local_time = dt
+                else:
+                    local_time = pytz.utc.localize(dt)
+
+                jst_time = local_time.astimezone(JST)
+
+                events.append({
+                    "team": team,
+                    "opp": str(comp.get("summary")),
+                    "jst": jst_time,
+                    "local": local_time
+                })
     except:
-        return pd.DataFrame()
+        pass
 
-# --- 4. メイン表示 ---
+    return events
+
+# --- fallback ---
+def load_fallback():
+    try:
+        with open("soccer_fallback.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            events = []
+            for d in data:
+                jst_time = datetime.fromisoformat(d["time"])
+                local = jst_time.astimezone(pytz.timezone(d["venue_tz"]))
+
+                events.append({
+                    "team": d["team"],
+                    "opp": d["opp"],
+                    "jst": jst_time,
+                    "local": local
+                })
+            return events
+    except:
+        return []
+
+# --- サッカー統合 ---
+@st.cache_data(ttl=3600)
+def get_soccer_events():
+    ICS_SOURCES = [
+        {"team": "名古屋グランパス", "url": "https://example.com/nagoya.ics"},
+        {"team": "レアル・ソシエダ", "url": "https://example.com/sociedad.ics"},
+        {"team": "日本代表", "url": "https://example.com/japan.ics"},
+        {"team": "U23日本代表", "url": "https://example.com/u23.ics"},
+    ]
+
+    all_events = []
+    for src in ICS_SOURCES:
+        all_events += load_ics_events(src["url"], src["team"])
+
+    if not all_events:
+        all_events = load_fallback()
+
+    return all_events
+
+# --- F1 ---
+@st.cache_data(ttl=3600)
+def get_f1():
+    return fastf1.get_event_schedule(now_jst.year)
+
+# --- UI ---
 st.title("🏎️⚽ Paddock & Pitch")
-st.write(f"Standard: **{now_jst.strftime('%m/%d %H:%M')}** JST")
+st.write(f"Now: **{now_jst.strftime('%m/%d %H:%M')} JST**")
 
 tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football", "🏎️ F1", "🏁 F2"])
 
-# --- サッカータブ ---
+# --- サッカー ---
 with tab_fb:
-    st.subheader("Web Sync: Nagoya Grampus")
-    matches = get_soccer_schedule_regex()
-    if matches:
-        # 重複を排除して表示
-        unique_matches = { (m['time'], m['opp']): m for m in matches }.values()
-        found_fb = False
-        for m in sorted(unique_matches, key=lambda x: x['time']):
-            if start_window <= m['time'] <= end_window:
-                found_fb = True
-                st.markdown(f"""
-                    <div class="session-card">
-                        <div class="session-name">【{m['team']}】 vs {m['opp']}</div>
-                        <span class="time-jst">🇯🇵 {m['time'].strftime('%m/%d %H:%M')} JST</span>
-                    </div>
-                """, unsafe_allow_html=True)
-        if not found_fb: st.info("直近30日間の試合予定はありません。")
+    events = get_soccer_events()
+
+    filtered = [e for e in events if start_window <= e["jst"] <= end_window]
+
+    if filtered:
+        for e in sorted(filtered, key=lambda x: x["jst"]):
+            st.markdown(f"""
+            <div class="session-card fb-card">
+                <div class="session-name">【{e['team']}】 vs {e['opp']}</div>
+                <div class="time-jst">🇯🇵 {e['jst'].strftime('%m/%d %H:%M')} JST</div>
+                <div class="time-local">🌍 {e['local'].strftime('%m/%d %H:%M %Z')}</div>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        st.error("サッカー日程の解析に失敗しました。URLまたはHTML構造を確認してください。")
+        st.info("直近30日間の試合予定なし")
 
-# --- F1/F2 共通データ取得 ---
-events = get_racing_events(now_jst.year)
-
-# --- F1タブ ---
+# --- F1 ---
 with tab_f1:
+    events = get_f1()
     if not events.empty:
-        # 過去3日〜未来のイベントを表示
-        upcoming_f1 = events[events['EventDate'] >= (now_jst.replace(tzinfo=None) - timedelta(days=3))]
-        for _, event in upcoming_f1.iterrows():
-            sessions = [('FP1', 'Session1DateUtc'), ('Qualifying', 'Session4DateUtc'), ('Sprint', 'Session3DateUtc'), ('Race', 'Session5DateUtc')]
-            display = []
-            for n, k in sessions:
-                if k in event and pd.notna(event[k]):
-                    t = event[k].replace(tzinfo=pytz.UTC).astimezone(JST)
-                    if start_window <= t <= end_window: display.append((n, t))
-            
-            if display:
-                st.markdown(f"<div class='event-title'>🏎️ {event['EventName']}</div>", unsafe_allow_html=True)
-                cols = st.columns(len(display))
-                for i, (n, t) in enumerate(display):
-                    with cols[i]:
-                        st.markdown(f"<div class='session-card f1-card'><div class='session-name'>{n}</div><div class='time-jst'>{t.strftime('%m/%d %H:%M')}</div></div>", unsafe_allow_html=True)
+        for _, e in events.iterrows():
+            race_time = e['Session5DateUtc']
+            if pd.notna(race_time):
+                jst_time = race_time.replace(tzinfo=pytz.UTC).astimezone(JST)
+
+                if start_window <= jst_time <= end_window:
+                    st.markdown(f"""
+                    <div class="session-card f1-card">
+                        <div class="session-name">{e['EventName']} - Race</div>
+                        <div class="time-jst">🇯🇵 {jst_time.strftime('%m/%d %H:%M')}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 # --- F2タブ ---
 with tab_f2:
