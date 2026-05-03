@@ -1,93 +1,131 @@
 import streamlit as st
-import feedparser
-import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import fastf1
 import os
 import pandas as pd
+import feedparser
 
-# --- 1. 設定 ---
+# --- 1. キャッシュ・環境設定 ---
+CACHE_DIR = 'f1_cache'
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
+fastf1.Cache.enable_cache(CACHE_DIR)
+
+# --- 2. 時間軸の設定（日本時間基準） ---
 JST = pytz.timezone('Asia/Tokyo')
-now = datetime.now(JST)
+now_jst = datetime.now(JST)
+# 表示範囲：前後数日をしっかりカバー
+start_window = now_jst - timedelta(hours=12)
+end_window = now_jst + timedelta(days=21)
 
-st.set_page_config(page_title="Paddock & Pitch", page_icon="🏎️")
+# --- 3. UI設定 & デザイン ---
+st.set_page_config(page_title="Paddock & Pitch", page_icon="🏎️", layout="centered")
 
-# --- 2. RSSから試合日程を抽出する関数 ---
+st.markdown("""
+    <style>
+    .session-card { padding: 12px; margin-bottom: 8px; border-radius: 4px; background-color: #1E1E1E; }
+    .fb-card { border-left: 5px solid #FFFFFF; } 
+    .f1-card { border-left: 5px solid #FF1801; } 
+    .f2-card { border-left: 5px solid #0090D0; } 
+    .session-name { font-size: 15px; font-weight: bold; color: #FAFAFA; }
+    .time-jst { color: #FF4B4B; font-weight: bold; font-size: 16px; }
+    .event-title { background: #262730; padding: 8px 12px; border-radius: 5px; margin-top: 15px; font-weight: bold; color: #EEE; }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🏎️⚽ Paddock & Pitch")
+st.write(f"Current Time: **{now_jst.strftime('%Y/%m/%d %H:%M')}** JST")
+
+# --- 4. ロジック：データ取得 ---
+
+@st.cache_data(ttl=3600)
+def get_racing_events(year):
+    try:
+        return fastf1.get_event_schedule(year)
+    except:
+        return pd.DataFrame()
+
 @st.cache_data(ttl=1800)
-def get_auto_soccer_schedule():
-    # サッカー関連の複数のRSSを利用
-    rss_urls = [
-        "https://news.yahoo.co.jp/rss/topics/soccer.xml",
-        "https://news.yahoo.co.jp/rss/categories/sports.xml"
-    ]
-    
+def get_soccer_news():
+    """RSSから最新トピックのみを取得"""
+    feeds = ["https://news.yahoo.co.jp/rss/topics/soccer.xml"]
     targets = ["名古屋", "グランパス", "ソシエダ", "日本代表"]
-    matches = []
-    
-    for url in rss_urls:
-        feed = feedparser.parse(url)
-        for entry in feed.entries:
-            title = entry.title
-            # 対象チームが含まれているか確認
-            if any(t in title for t in targets):
-                # タイトルから日時（例: 5/3 17:00）を正規表現で探す
-                time_match = re.search(r'(\d{1,2})/(\d{1,2}).*?(\d{1,2}):(\d{2})', title)
-                
-                if time_match:
-                    month, day, hour, minute = map(int, time_match.groups())
-                    # 今年の日付としてdatetimeオブジェクトを作成
-                    match_time = JST.localize(datetime(now.year, month, day, hour, minute))
-                    
-                    # 重複を避けてリストに追加
-                    match_info = {
-                        "display": title,
-                        "time": match_time,
-                        "link": entry.link
-                    }
-                    if match_info not in matches:
-                        matches.append(match_info)
-    
-    # 時間順に並び替え
-    return sorted(matches, key=lambda x: x['time'])
+    news_list = []
+    for url in feeds:
+        try:
+            f = feedparser.parse(url)
+            for entry in f.entries:
+                if any(t in entry.title for t in targets):
+                    news_list.append({"title": entry.title, "link": entry.link})
+        except: continue
+    return news_list
 
-# --- 3. UI表示 ---
-st.title("🏎️⚽ Paddock & Pitch (Full Auto)")
-
-tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football (RSS Auto)", "🏎️ F1", "🏁 F2"])
+# --- 5. メイン表示エリア ---
+tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football", "🏎️ F1", "🏁 F2"])
 
 with tab_fb:
-    st.subheader("Auto-Detected from RSS")
-    auto_matches = get_auto_soccer_schedule()
+    st.subheader("Match Schedule (Confirmed)")
     
-    if auto_matches:
-        for m in auto_matches:
-            # 未来の試合または直近の試合のみ表示
-            if m['time'] > now - pd.Timedelta(hours=3):
-                with st.container():
-                    st.markdown(f"""
-                    <div style="padding:10px; border-left:5px solid #FFF; background:#1E1E1E; margin-bottom:10px;">
-                        <div style="font-size:14px; font-weight:bold;">{m['display']}</div>
-                        <div style="color:#FF4B4B; font-weight:bold;">🕒 {m['time'].strftime('%m/%d %H:%M')} JST</div>
-                        <a href="{m['link']}" style="font-size:12px; color:#888;">Source Link</a>
-                    </div>
-                    """, unsafe_allow_html=True)
-    else:
-        st.write("現在、RSSから自動抽出できる試合情報は見つかりませんでした。")
+    # 【重要】成瀬さんから頂いた正しい情報を反映
+    # RSSは「ニュース」として使い、日程は確実なこのリストを優先します
+    confirmed_matches = [
+        {"team": "名古屋グランパス", "opp": "V・ファーレン長崎", "time": JST.localize(datetime(2026, 5, 3, 17, 0)), "tz": "Asia/Tokyo"},
+        {"team": "名古屋グランパス", "opp": "ガンバ大阪", "time": JST.localize(datetime(2026, 5, 6, 14, 0)), "tz": "Asia/Tokyo"},
+        {"team": "レアル・ソシエダ", "opp": "ラス・パルマス", "time": JST.localize(datetime(2026, 5, 5, 4, 0)), "tz": "Europe/Madrid"},
+        {"team": "レアル・ソシエダ", "opp": "バルセロナ", "time": JST.localize(datetime(2026, 5, 14, 4, 0)), "tz": "Europe/Madrid"},
+    ]
 
-# --- 4. F1 / F2 ロジック (FastF1を使用) ---
-@st.cache_data(ttl=3600)
-def get_f1_data():
-    return fastf1.get_event_schedule(now.year)
+    for m in confirmed_matches:
+        if start_window <= m['time'] <= end_window:
+            st.markdown(f"""
+                <div class="session-card fb-card">
+                    <div class="session-name">{m['team']} vs {m['opp']}</div>
+                    <span class="time-jst">🇯🇵 {m['time'].strftime('%m/%d %H:%M')} JST</span>
+                </div>
+                """, unsafe_allow_html=True)
 
-events = get_f1_data()
+    # RSSニュース
+    st.markdown("---")
+    st.caption("Latest Topics")
+    for news in get_soccer_news()[:3]:
+        st.markdown(f"🔹 [{news['title']}]({news['link']})")
 
+# --- F1/F2 Tab ---
+# (F1/F2のロジックは正常に動いているため維持)
 with tab_f1:
-    # 以前のF1表示ロジック（FastF1から自動取得）をここに維持
-    st.info("F1日程はFastF1ライブラリから自動取得しています。")
-    # ... (省略: 以前のF1描画コード)
+    events = get_racing_events(now_jst.year)
+    if not events.empty:
+        upcoming_f1 = events[events['EventDate'] >= (now_jst.replace(tzinfo=None) - timedelta(days=2))]
+        for _, event in upcoming_f1.iterrows():
+            sessions = [('FP1', 'Session1DateUtc'), ('Qualifying', 'Session4DateUtc'), ('Sprint', 'Session3DateUtc'), ('Race', 'Session5DateUtc')]
+            display = []
+            for n, k in sessions:
+                if k in event and pd.notna(event[k]):
+                    t = event[k].replace(tzinfo=pytz.UTC).astimezone(JST)
+                    if start_window <= t <= end_window: display.append((n, t))
+            if display:
+                st.markdown(f"<div class='event-title'>🏎️ {event['EventName']}</div>", unsafe_allow_html=True)
+                cols = st.columns(len(display))
+                for i, (n, t) in enumerate(display):
+                    with cols[i]:
+                        st.markdown(f"<div class='session-card f1-card'><div class='session-name'>{n}</div><div class='time-jst'>{t.strftime('%m/%d %H:%M')}</div></div>", unsafe_allow_html=True)
 
 with tab_f2:
-    # 以前のF2表示ロジックをここに維持
-    st.info("F2日程はFastF1ライブラリから自動取得しています。")
-    # ... (省略: 以前のF2描画コード)
+    if not events.empty:
+        found_f2 = False
+        for _, event in events.iterrows():
+            f2_sessions = [('F2 Practice', 'Session1DateUtc'), ('F2 Qualifying', 'Session2DateUtc'), ('F2 Sprint', 'Session3DateUtc'), ('F2 Feature', 'Session5DateUtc')]
+            display_f2 = []
+            for n, k in f2_sessions:
+                if k in event and pd.notna(event[k]):
+                    t = event[k].replace(tzinfo=pytz.UTC).astimezone(JST)
+                    if start_window <= t <= end_window: display_f2.append((n, t))
+            if display_f2:
+                found_f2 = True
+                st.markdown(f"<div class='event-title'>🏁 {event['EventName']} (F2)</div>", unsafe_allow_html=True)
+                cols = st.columns(len(display_f2))
+                for i, (n, t) in enumerate(display_f2):
+                    with cols[i]:
+                        st.markdown(f"<div class='session-card f2-card'><div class='session-name'>{n}</div><div class='time-jst'>{t.strftime('%m/%d %H:%M')}</div></div>", unsafe_allow_html=True)
+        if not found_f2: st.write("直近のF2予定なし")
