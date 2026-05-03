@@ -6,26 +6,20 @@ import requests
 from icalendar import Calendar
 import fastf1
 import os
-import fastf1
 
-CACHE_DIR = "cache"
-
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
-
-fastf1.Cache.enable_cache(CACHE_DIR)
 # -----------------------------
 # 基本設定
 # -----------------------------
 JST = pytz.timezone("Asia/Tokyo")
 now_jst = datetime.now(JST)
 
-# 表示ウィンドウ
 start_window = now_jst - timedelta(hours=6)
 end_window = now_jst + timedelta(days=30)
 
-# FastF1キャッシュ（安定化）
-fastf1.Cache.enable_cache("cache")
+# FastF1キャッシュ（エラー防止込み）
+CACHE_DIR = "cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+fastf1.Cache.enable_cache(CACHE_DIR)
 
 st.set_page_config(
     page_title="Paddock & Pitch",
@@ -66,7 +60,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------
-# ICS取得
+# ① ICS取得（強化版）
 # -----------------------------
 @st.cache_data(ttl=3600)
 def load_laliga():
@@ -74,14 +68,23 @@ def load_laliga():
     events = []
 
     try:
-        r = requests.get(url, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        r = requests.get(url, headers=headers, timeout=10)
+
+        # ICSチェック
+        if "BEGIN:VCALENDAR" not in r.text:
+            raise ValueError("Invalid ICS response")
+
         cal = Calendar.from_ical(r.text)
 
         for comp in cal.walk():
             if comp.name == "VEVENT":
                 summary = str(comp.get("summary"))
 
-                # ★ レアル・ソシエダのみ抽出
+                # ソシエダのみ抽出
                 if "sociedad" not in summary.lower():
                     continue
 
@@ -101,9 +104,21 @@ def load_laliga():
                 })
 
     except Exception as e:
-        st.error("La Liga ICS取得エラー")
+        print("ICS error:", e)
 
     return events
+
+# -----------------------------
+# ② fallback（保険）
+# -----------------------------
+def fallback_sociedad():
+    return [
+        {
+            "title": "Real Sociedad vs TBD (fallback)",
+            "jst": JST.localize(datetime(2026, 5, 10, 22, 0)),
+            "local": JST.localize(datetime(2026, 5, 10, 22, 0))
+        }
+    ]
 
 # -----------------------------
 # F1取得
@@ -121,16 +136,20 @@ st.write(f"Now: **{now_jst.strftime('%m/%d %H:%M')} JST**")
 tab_soc, tab_f1 = st.tabs(["⚽ Real Sociedad", "🏎️ F1"])
 
 # -----------------------------
-# ソシエダ
+# ③ ソシエダ表示（fallback込み）
 # -----------------------------
 with tab_soc:
     events = load_laliga()
+
+    # fallback適用
+    if not events:
+        events = fallback_sociedad()
+        st.warning("⚠ ICS取得失敗のためfallback表示")
 
     filtered = [e for e in events if start_window <= e["jst"] <= end_window]
 
     if filtered:
         for e in sorted(filtered, key=lambda x: x["jst"]):
-
             st.markdown(f"""
             <div class="card">
                 <div class="title">⚽ {e['title']}</div>
@@ -142,7 +161,7 @@ with tab_soc:
         st.info("直近30日間の試合予定なし")
 
 # -----------------------------
-# F1
+# F1表示（そのまま）
 # -----------------------------
 with tab_f1:
     events = load_f1()
