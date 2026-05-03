@@ -1,7 +1,6 @@
 streamlit
 pandas
 pytz
-fastf1==3.4.0
+fastf1
+icalendar
 requests
-numpy<2.0.0
-feedparser
