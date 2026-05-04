@@ -3,8 +3,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import fastf1
+import requests
 
 # --- 1. 設定 ---
+API_KEY = "42b577d5380e44d38221b7d4986521ca"
 JST = pytz.timezone('Asia/Tokyo')
 now_jst = datetime.now(JST)
 start_window = now_jst - timedelta(hours=12)
@@ -18,20 +20,22 @@ st.markdown("""
     .session-card { padding: 12px; margin-bottom: 8px; border-radius: 4px; background-color: #1E1E1E; border-left: 5px solid #FFFFFF; }
     .f1-card { border-left-color: #FF1801; }
     .f2-card { border-left-color: #0090D0; }
+    .fb-card { border-left-color: #4CAF50; }
     .session-name { font-size: 15px; font-weight: bold; color: #FAFAFA; }
     .time-jst { color: #FF4B4B; font-weight: bold; font-size: 16px; }
     .event-title { background: #262730; padding: 8px 12px; border-radius: 5px; margin-top: 15px; font-weight: bold; color: #EEE; }
     .link-button { 
-        display: block; width: 100%; padding: 15px; margin: 10px 0; 
+        display: block; width: 100%; padding: 10px; margin: 5px 0; 
         text-align: center; background-color: #31333F; color: white; 
         text-decoration: none; border-radius: 8px; border: 1px solid #4B4B4B;
-        font-weight: bold; transition: 0.3s;
+        font-weight: bold; font-size: 14px;
     }
     .link-button:hover { background-color: #FF4B4B; border-color: #FF4B4B; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. F1/F2 ロジック ---
+# --- 2. データ取得ロジック ---
+
 @st.cache_data(ttl=3600)
 def get_racing_events(year):
     try:
@@ -39,27 +43,62 @@ def get_racing_events(year):
     except:
         return pd.DataFrame()
 
+@st.cache_data(ttl=3600)
+def get_fb_matches(team_id):
+    url = f"https://api.football-data.org/v4/teams/{team_id}/matches?status=SCHEDULED"
+    headers = {'X-Auth-Token': API_KEY}
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json().get('matches', [])
+    except:
+        pass
+    return []
+
 # --- 3. メイン表示 ---
 st.title("🏎️⚽ Paddock & Pitch")
 st.write(f"Standard: **{now_jst.strftime('%m/%d %H:%M')}** JST")
 
-tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football Links", "🏎️ F1 Schedule", "🏁 F2 Schedule"])
+tab_fb, tab_f1, tab_f2 = st.tabs(["⚽ Football", "🏎️ F1 Schedule", "🏁 F2 Schedule"])
 
-# --- サッカータブ：公式リンク集 ---
+# --- サッカータブ：API ＋ リンク集 ---
 with tab_fb:
-    st.subheader("Official Match Schedules")
-    st.write("最新の試合日程・結果は公式サイトでチェック！")
+    st.subheader("Upcoming Matches (API)")
     
-    # 名古屋グランパス
-    st.markdown('<a href="https://nagoya-grampus.jp/game/schedule/" target="_blank" class="link-button">🔥 名古屋グランパス 公式日程</a>', unsafe_allow_html=True)
+    # チームID設定: ソシエダ(92), 日本代表(773)
+    teams = [("Real Sociedad", 92), ("Japan", 773)]
+    found_any_match = False
     
-    # レアル・ソシエダ（日本語版または公式）
-    st.markdown('<a href="https://www.realsociedad.eus/es/equipo/partidos/real-sociedad" target="_blank" class="link-button">🇪🇸 レアル・ソシエダ 公式日程</a>', unsafe_allow_html=True)
-    
-    # 日本代表（JFA公式）
-    st.markdown('<a href="https://www.jfa.jp/samuraiblue/schedule_result/2026.html" target="_blank" class="link-button">🇯🇵 日本代表 (SAMURAI BLUE)</a>', unsafe_allow_html=True)
-    
-    st.info("※ブラウザの別タブで開きます。")
+    for team_name, team_id in teams:
+        matches = get_fb_matches(team_id)
+        for m in matches:
+            # UTC文字列をdatetimeに変換しJSTへ
+            utc_time = datetime.strptime(m['utcDate'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=pytz.UTC)
+            jst_time = utc_time.astimezone(JST)
+            
+            if start_window <= jst_time <= end_window:
+                found_any_match = True
+                home = m['homeTeam']['shortName']
+                away = m['awayTeam']['shortName']
+                st.markdown(f"""
+                <div class="session-card fb-card">
+                    <div class="session-name">🏆 {team_name}: {home} vs {away}</div>
+                    <div class="time-jst">🇯🇵 {jst_time.strftime('%m/%d %H:%M')} JST</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+    if not found_any_match:
+        st.info("直近30日間にAPI取得可能な試合はありません。")
+
+    st.markdown("---")
+    st.subheader("Official Quick Links")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown('<a href="https://nagoya-grampus.jp/game/schedule/" target="_blank" class="link-button">名古屋</a>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<a href="https://www.realsociedad.eus/es/equipo/partidos/real-sociedad" target="_blank" class="link-button">Sociedad</a>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<a href="https://www.jfa.jp/samuraiblue/schedule_result/2026.html" target="_blank" class="link-button">日本代表</a>', unsafe_allow_html=True)
 
 # --- F1/F2 データ取得 ---
 events = get_racing_events(now_jst.year)
