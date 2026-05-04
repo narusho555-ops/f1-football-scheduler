@@ -72,11 +72,11 @@ with tab_fb:
     for team_name, team_id in teams:
         matches = get_fb_matches(team_id)
         for m in matches:
-        # 1. APIからのUTC時刻を「タイムゾーン付きUTC」として読み込む
-        utc_time = datetime.strptime(m['utcDate'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=pytz.UTC)
-        
-        # 2. 直接 JST に変換（pytzがサマータイム差分を考慮して変換してくれます）
-        jst_time = utc_time.astimezone(JST)
+            # 1. APIからのUTC時刻を「タイムゾーン付きUTC」として読み込む
+            utc_time = datetime.strptime(m['utcDate'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=pytz.UTC)
+            
+            # 2. 直接 JST に変換（pytzがサマータイム差分を考慮して変換してくれます）
+            jst_time = utc_time.astimezone(JST)
             
             if start_window <= jst_time <= end_window:
                 found_any_match = True
